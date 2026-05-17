@@ -1,10 +1,30 @@
 {
-  "apple_id": "your@icloud.email",
-  "app_password": "xxxx-xxxx-xxxx-xxxx",
-  "user_id": "0012345678",
-  "default_calendar": "",
-  "calendars": {
-    "工作": "日历ID",
-    "家庭日历": "日历ID"
-  }
+	"apple_id": "your@icloud.email",
+	"app_password": "your-app-password",
+	"user_id": "your-user-id",
+	"caldav_url": "https://pXX-caldav.icloud.com",
+	"default_calendar": "",
+	"event_timezone": "UTC",
+	"calendars": {
+		"Work": "calendar-id",
+		"Family": "calendar-id"
+	},
+	"bridge": {
+		"host": "127.0.0.1",
+		"port": 8088,
+		"public_base_url": "https://your-bridge-host.example",
+		"read_auth": {
+			"keys": {
+				"agent-main": {
+					"salt": "replace-with-long-random-salt",
+					"key": "replace-with-long-random-key"
+				}
+			}
+		},
+		"rate_limit": {
+			"enabled": true,
+			"window_seconds": 60,
+			"max_requests": 120
+		}
+	}
 }
