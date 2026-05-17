@@ -2,6 +2,12 @@
 
 > Access iCloud Calendar via CalDAV protocol
 
+## Project status
+
+This is an unofficial personal integration built for my tinyPeople workflows.
+It is intended as a practical dev-around to use a SKILL.md style usage and direct tool integration from .openclaw and get it working for tinyNature agents.
+It is not an official tinyNature or tinyPeople project, product, or supported codebase.
+
 ## Attribution
 
 This project is adapted from [lemoncat7/icloud-calendar](https://github.com/lemoncat7/icloud-calendar) and has been extended for use in [tinyPeople](https://tinynature.ai/) (originally developed for .openclaw). The original code is MIT licensed, as is this adaptation.
@@ -227,14 +233,14 @@ This endpoint does not require auth and is useful for:
 
 Enable debug logs without restarting the bridge:
 
-**Option 1: Environment variable**
+#### Option 1: Environment variable
 
 ```bash
 export ICLOUD_BRIDGE_DEBUG=1
 python3 ~/.tinyPeople/scripts/icloud_bridge.py
 ```
 
-**Option 2: Debug flag file**
+#### Option 2: Debug flag file
 
 Create an empty file at the path shown in `/health` (or configure it in `bridge.debug_flag_file`):
 
@@ -244,7 +250,7 @@ touch /tmp/bridge-debug.on
 
 The bridge checks this file on every request. Remove it to disable debug logging without restart.
 
-**Option 3: Config file**
+#### Option 3: Config file
 
 Set `bridge.debug_flag_file` in your config.json:
 
@@ -274,7 +280,7 @@ Keep this bridge read-only. Do not expose add/delete endpoints through static di
 
 The bridge supports multiple `key_id` entries, so you can rotate keys without downtime:
 
-**Step 1: Add a new key**
+#### Step 1: Add a new key
 
 On the server, run:
 
@@ -283,16 +289,17 @@ python3 ~/.tinyPeople/scripts/rotate_bridge_key.py --base-url https://your-bridg
 ```
 
 This will:
+
 1. Generate a new salt and key
 2. Add them to the config under a new `key_id`
 3. Print fresh digests for all active keys (old and new)
 4. Create a backup of the config
 
-**Step 2: Update clients**
+#### Step 2: Update clients
 
 Update all clients to use the new digest URLs (old digests remain valid).
 
-**Step 3: Retire the old key**
+#### Step 3: Retire the old key
 
 Once all clients are updated, retire the old key:
 
@@ -302,7 +309,7 @@ python3 rotate_bridge_key.py --retire-old agent-main
 
 This removes the old `key_id` from the config.
 
-**Options:**
+#### Options
 
 ```bash
 # Use a specific key_id name
@@ -344,7 +351,7 @@ Rate-limited requests return HTTP 429.
 
 When deployed with cPanel/.cpanel.yml, the bridge writes a `.deploy-stamp.env` file containing:
 
-```
+```text
 POD_APP_REVISION=c3d67e2
 POD_APP_BUILD=2026-05-17T02:53:31Z
 ```
