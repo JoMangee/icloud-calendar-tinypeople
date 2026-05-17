@@ -15,8 +15,13 @@ import sys
 import os
 import re
 from shutil import which
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 # ====== Config ======
 CONFIG_DIR = os.path.expanduser("~/.tinyPeople/conf/icloud-calendar")
@@ -69,6 +74,26 @@ def _debug_log(message):
         print(f"[bridge-debug][calendar] {message}", file=sys.stderr, flush=True)
 
 
+def _local_now_naive():
+    """Return local wall-clock time as naive datetime for stable downstream behavior."""
+    return datetime.now().astimezone().replace(tzinfo=None)
+
+
+def _resolve_zoneinfo(tzid):
+    if not tzid or ZoneInfo is None:
+        return None
+    try:
+        return ZoneInfo(tzid)
+    except Exception:
+        return None
+
+
+def _configured_event_timezone():
+    """Optional IANA timezone used when creating events (e.g., Europe/Berlin)."""
+    tzid = (config.get("event_timezone", "") or os.environ.get("ICLOUD_EVENT_TZ", "")).strip()
+    return tzid
+
+
 def _parse_dtstart_from_line(line):
     """Parse DTSTART lines that may be date-only or date-time with optional seconds/Z."""
     # Examples:
@@ -76,20 +101,42 @@ def _parse_dtstart_from_line(line):
     # DTSTART:20260301T2157
     # DTSTART:20260301T215700Z
     # DTSTART;VALUE=DATE:20260301
-    match_dt = re.search(r'DTSTART[^:]*:(\d{8})T(\d{2})(\d{2})(\d{0,2})Z?', line)
-    if match_dt:
-        ymd = match_dt.group(1)
-        hh = match_dt.group(2)
-        mm = match_dt.group(3)
-        # Ignore seconds for now to keep downstream minute-level behavior stable.
-        return datetime.strptime(f"{ymd}T{hh}{mm}", "%Y%m%dT%H%M")
+    match = re.search(r'DTSTART(?P<params>[^:]*):(?P<value>[^\r\n]+)', line)
+    if not match:
+        return None
+
+    params = match.group("params") or ""
+    value = (match.group("value") or "").strip()
 
     # All-day events often arrive as VALUE=DATE:YYYYMMDD.
-    match_date = re.search(r'DTSTART[^:]*:(\d{8})$', line.strip())
-    if match_date:
-        return datetime.strptime(match_date.group(1), "%Y%m%d")
+    if "VALUE=DATE" in params.upper() or re.fullmatch(r"\d{8}", value):
+        dt = datetime.strptime(value[:8], "%Y%m%d")
+        return dt
 
-    return None
+    tz_match = re.search(r'TZID=([^;:]+)', params, flags=re.I)
+    tzid = tz_match.group(1) if tz_match else ""
+
+    # Accept HHMM or HHMMSS forms, with optional trailing Z.
+    raw = value.rstrip("Z")
+    match_dt = re.fullmatch(r'(\d{8})T(\d{2})(\d{2})(\d{0,2})', raw)
+    if not match_dt:
+        return None
+
+    ymd = match_dt.group(1)
+    hh = match_dt.group(2)
+    mm = match_dt.group(3)
+    dt = datetime.strptime(f"{ymd}T{hh}{mm}", "%Y%m%dT%H%M")
+
+    local_tz = datetime.now().astimezone().tzinfo
+    if value.endswith("Z"):
+        return dt.replace(tzinfo=timezone.utc).astimezone(local_tz).replace(tzinfo=None)
+
+    event_tz = _resolve_zoneinfo(tzid)
+    if event_tz:
+        return dt.replace(tzinfo=event_tz).astimezone(local_tz).replace(tzinfo=None)
+
+    # Floating time (no explicit zone): treat as local wall-clock.
+    return dt
 
 def _config_candidates():
     """Return possible config paths in priority order."""
@@ -168,7 +215,7 @@ def query_calendar_events(cal_id, start_offset_hours=-1, end_offset_days=7):
     """Query calendar events"""
     url = f"{CALDAV_URL}/{USER_ID}/calendars/{cal_id}"
     
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     start = (now + timedelta(hours=start_offset_hours)).strftime("%Y%m%dT%H%M%SZ")
     end = (now + timedelta(days=end_offset_days)).strftime("%Y%m%dT%H%M%SZ")
     
@@ -237,7 +284,7 @@ def list_calendars():
 
 def get_events_list(days=7, limit=20):
     """Return events for the next N days"""
-    now = datetime.now()
+    now = _local_now_naive()
     all_events = []
 
     for cal_name, cal_id in CALENDARS.items():
@@ -259,7 +306,7 @@ def get_events_list(days=7, limit=20):
 
 def get_upcoming_events(minutes=30):
     """Return events in the next N minutes"""
-    now = datetime.now()
+    now = _local_now_naive()
     all_events = []
 
     for cal_name, cal_id in CALENDARS.items():
@@ -281,7 +328,7 @@ def get_upcoming_events(minutes=30):
 
 def get_today_events():
     """Return today's events"""
-    now = datetime.now()
+    now = _local_now_naive()
     today_end = datetime(now.year, now.month, now.day, 23, 59)
     filter_minutes = max(int((today_end - now).total_seconds() / 60), 1)
     all_events = []
@@ -323,19 +370,30 @@ def cmd_add(summary, description="", minutes=20):
     if not cal_id:
         return {"error": f"Calendar not found: {calendar_name}"}
     
-    # Calculate time
-    start_time = datetime.now() + timedelta(minutes=minutes)
+    tzid = _configured_event_timezone()
+    event_tz = _resolve_zoneinfo(tzid)
+
+    # Calculate time in configured timezone (or UTC by default).
+    now_for_event = datetime.now(event_tz) if event_tz else datetime.now(timezone.utc)
+    start_time = now_for_event + timedelta(minutes=minutes)
     end_time = start_time + timedelta(minutes=20)
     
     # Generate unique ID
     event_uid = str(uuid.uuid4())
     
+    if event_tz and tzid:
+        dtstart_line = f"DTSTART;TZID={tzid}:{start_time.strftime('%Y%m%dT%H%M%S')}"
+        dtend_line = f"DTEND;TZID={tzid}:{end_time.strftime('%Y%m%dT%H%M%S')}"
+    else:
+        dtstart_line = f"DTSTART:{start_time.strftime('%Y%m%dT%H%M%SZ')}"
+        dtend_line = f"DTEND:{end_time.strftime('%Y%m%dT%H%M%SZ')}"
+
     # Build iCal format
     ical = f"""BEGIN:VCALENDAR
 VERSION:2.0
 BEGIN:VEVENT
-DTSTART;TZID=Pacific/Auckland:{start_time.strftime("%Y%m%dT%H%M%S")}
-DTEND;TZID=Pacific/Auckland:{end_time.strftime("%Y%m%dT%H%M%S")}
+{dtstart_line}
+{dtend_line}
 SUMMARY:{summary}
 DESCRIPTION:{description}
 UID:{event_uid}
@@ -403,7 +461,7 @@ def cmd_delete(identifier, calendar_name=None):
     else:
         calendars_to_search = CALENDARS
     
-    now = datetime.now()
+    now = _local_now_naive()
     
     # First try to delete directly as UID (only when identifier looks like a UUID)
     uuid_pattern = re.compile(r'^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$', re.I)

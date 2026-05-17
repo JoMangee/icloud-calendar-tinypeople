@@ -41,6 +41,7 @@ Edit `~/.tinyPeople/conf/icloud-calendar/config.json`:
   "user_id": "your-user-id",
   "caldav_url": "https://pXX-caldav.icloud.com",
   "default_calendar": "",
+  "event_timezone": "UTC",
   "calendars": {
     "Work": "calendar-id",
     "Family": "calendar-id"
@@ -66,6 +67,12 @@ Edit `~/.tinyPeople/conf/icloud-calendar/config.json`:
 }
 ```
 
+Timezone note:
+
+- `event_timezone` is optional and should be an IANA zone (for example `Pacific/Auckland`, `America/New_York`, `Europe/Berlin`)
+- if omitted, created events are written in UTC (`...Z`) to avoid DST ambiguity
+- incoming `DTSTART` values are parsed for `TZID`, `Z` (UTC), or floating local times
+
 ### 2. Get an App Specific Password
 
 1. Sign in at [appleid.apple.com](https://appleid.apple.com)
@@ -85,6 +92,7 @@ Set:
 
 - `user_id` from the URL segment
 - `caldav_url` from `calendar-home-set` href host (for example `https://p40-caldav.icloud.com`)
+- shard hosts vary by account/region and can look like `p0-caldav.icloud.com`, `p40-caldav.icloud.com`, etc.; this is expected
 
 ### 4. Get calendar IDs
 
@@ -195,18 +203,24 @@ Returns:
   "service": "icloud-calendar-bridge",
   "revision": "abc1234",
   "build": "2026-05-17T02:53:31Z",
-  "config_path": "~/.tinyPeople/conf/icloud-calendar/config.json",
   "credentials_set": true,
-  "calendar_count": 9,
-  "debug_enabled": false,
-  "debug_flag_path": "/tmp/bridge-debug.on"
+  "calendar_count": 9
+}
+```
+
+When runtime debug is enabled, `/health` also includes:
+
+```json
+{
+  "debug_flag_path": "/path/to/bridge-debug.on"
 }
 ```
 
 This endpoint does not require auth and is useful for:
+
 - Checking bridge deployment status
-- Verifying calendar count and config path
-- Checking debug status
+- Verifying calendar count and credential wiring
+- Checking active debug-flag location (only when debug is enabled)
 - Retrieving revision/build metadata
 
 ### Debug logging (runtime toggle)
