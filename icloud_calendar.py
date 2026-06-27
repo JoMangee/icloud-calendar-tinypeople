@@ -221,8 +221,18 @@ def query_calendar_events(cal_id, start_offset_hours=-1, end_offset_days=7):
     
     data = f'''<?xml version="1.0" encoding="UTF-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
-  <d:prop><c:calendar-data/></d:prop>
-  <c:filter><c:comp-filter name="VCALENDAR"/></c:filter>
+    <d:prop>
+        <c:calendar-data>
+            <c:expand start="{start}" end="{end}"/>
+        </c:calendar-data>
+    </d:prop>
+    <c:filter>
+        <c:comp-filter name="VCALENDAR">
+            <c:comp-filter name="VEVENT">
+                <c:time-range start="{start}" end="{end}"/>
+            </c:comp-filter>
+        </c:comp-filter>
+    </c:filter>
 </c:calendar-query>'''
     
     result = run_curl("REPORT", url, data=data, headers=["Content-Type: application/xml; charset=utf-8", "Depth: 1"])
@@ -315,7 +325,8 @@ def get_events_list(days=7, limit=20):
     return {"events": all_events[:max(limit, 1)]}
 
 
-def get_upcoming_events(minutes=30):
+def get_upcoming_events(
+    minutes=30):
     """Return events in the next N minutes"""
     now = _local_now_naive()
     all_events = []
@@ -366,7 +377,14 @@ def cmd_list():
 
 def cmd_upcoming():
     """Get events in the next 30 minutes"""
-    print(json.dumps(get_upcoming_events(minutes=30), indent=2, ensure_ascii=False))
+    minutes = 30
+    if len(sys.argv) > 2:
+        try:
+            minutes = max(int(sys.argv[2]), 1)
+        except ValueError:
+            print("Error: upcoming minutes must be an integer")
+            sys.exit(1)
+    print(json.dumps(get_upcoming_events(minutes=minutes), indent=2, ensure_ascii=False))
 
 def cmd_today():
     """Get today's events"""
@@ -483,7 +501,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage:")
         print("  python3 icloud_calendar.py list          # List all events (next 7 days)")
-        print("  python3 icloud_calendar.py upcoming     # Get events in the next 30 minutes")
+        print("  python3 icloud_calendar.py upcoming [minutes]  # Get events in the next N minutes (default: 30)")
         print("  python3 icloud_calendar.py today         # Get today's events")
         print("  python3 icloud_calendar.py calendars     # Get calendar list")
         print("  python3 icloud_calendar.py add <title> [minutes]  # Add event")
