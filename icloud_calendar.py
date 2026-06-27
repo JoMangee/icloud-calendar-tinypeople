@@ -228,51 +228,62 @@ def query_calendar_events(cal_id, start_offset_hours=-1, end_offset_days=7):
     result = run_curl("REPORT", url, data=data, headers=["Content-Type: application/xml; charset=utf-8", "Depth: 1"])
     return result
 
+
+def _normalize_ical_payload(payload):
+    """Normalize iCal text from CalDAV XML bodies into line-oriented content."""
+    text = payload or ""
+
+    # Some servers embed escaped CR/LF sequences inside XML calendar-data.
+    if "\\r\\n" in text or "\\n" in text or "\\r" in text:
+        text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # RFC5545 folding: continuation lines begin with a space/tab.
+    text = re.sub(r"\n[ \t]", "", text)
+    return text
+
+
+def _extract_ical_field(block, field_name):
+    """Extract a field value allowing optional iCal parameters."""
+    pattern = rf'(?im)^{re.escape(field_name)}(?:;[^:\r\n]*)?:(?P<value>[^\r\n]*)'
+    match = re.search(pattern, block)
+    if not match:
+        return ""
+    return (match.group("value") or "").strip()
+
+
+def _iter_vevent_blocks(payload):
+    """Yield VEVENT payloads from a CalDAV REPORT response."""
+    normalized = _normalize_ical_payload(payload)
+    return re.finditer(r'BEGIN:VEVENT\n(?P<body>.*?)\nEND:VEVENT', normalized, flags=re.S | re.I)
+
 def parse_events(result, now, filter_minutes=30):
     """Parse events"""
     events = []
-    lines = result.split('\n')
-    current_event = {}
-    in_vevent = False
-    
-    for line in lines:
-        # Detect VEVENT boundaries
-        if 'BEGIN:VEVENT' in line:
-            in_vevent = True
-            current_event = {}
+    for match in _iter_vevent_blocks(result):
+        block = match.group("body")
+
+        dt_line_match = re.search(r'(?im)^DTSTART[^:\r\n]*:[^\r\n]+', block)
+        if not dt_line_match:
             continue
-        if 'END:VEVENT' in line:
-            in_vevent = False
-            if current_event.get('dt') and current_event.get('summary'):
-                try:
-                    dt = current_event['dt']
-                    diff = (dt - now).total_seconds() / 60
-                    current_event['time'] = dt.strftime("%m-%d %H:%M")
-                    current_event['minutes_until'] = int(diff)
-                    
-                    if 0 <= diff < filter_minutes:
-                        events.append({
-                            'summary': current_event['summary'],
-                            'time': current_event['time'],
-                            'minutes_until': int(diff),
-                            'calendar': current_event.get('calendar', 'Unknown')
-                        })
-                except:
-                    pass
-            current_event = {}
+
+        dt = _parse_dtstart_from_line(dt_line_match.group(0))
+        summary = _extract_ical_field(block, "SUMMARY")
+        if not dt or not summary:
             continue
-        
-        if not in_vevent:
+
+        try:
+            diff = (dt - now).total_seconds() / 60
+            if 0 <= diff < filter_minutes:
+                events.append({
+                    'summary': summary,
+                    'time': dt.strftime("%m-%d %H:%M"),
+                    'minutes_until': int(diff),
+                    'calendar': 'Unknown'
+                })
+        except Exception:
             continue
-            
-        if 'DTSTART' in line:
-            dt = _parse_dtstart_from_line(line)
-            if dt:
-                current_event['dt'] = dt
-        if 'SUMMARY' in line:
-            match = re.search(r'SUMMARY:([^\r\n]+)', line)
-            if match:
-                current_event['summary'] = match.group(1).strip()
     
     return events
 
@@ -409,44 +420,26 @@ END:VCALENDAR"""
 def parse_events_with_uid(result, now):
     """Parse events (including UID)"""
     events = []
-    lines = result.split('\n')
-    current_event = {}
-    in_vevent = False
-    
-    for line in lines:
-        # Detect VEVENT boundaries
-        if 'BEGIN:VEVENT' in line:
-            in_vevent = True
-            current_event = {}
+    for match in _iter_vevent_blocks(result):
+        block = match.group("body")
+
+        uid = _extract_ical_field(block, "UID")
+        summary = _extract_ical_field(block, "SUMMARY")
+        dt_line_match = re.search(r'(?im)^DTSTART[^:\r\n]*:[^\r\n]+', block)
+        dt = _parse_dtstart_from_line(dt_line_match.group(0)) if dt_line_match else None
+
+        if not (dt and uid and summary):
             continue
-        if 'END:VEVENT' in line:
-            in_vevent = False
-            # When VEVENT ends, check if we have a complete event
-            if current_event.get('dt') and current_event.get('uid') and current_event.get('summary'):
-                try:
-                    dt = current_event['dt']
-                    current_event['minutes_until'] = int((dt - now).total_seconds() / 60)
-                    events.append(current_event.copy())
-                except:
-                    pass
-            current_event = {}
+
+        try:
+            events.append({
+                'uid': uid,
+                'summary': summary,
+                'dt': dt,
+                'minutes_until': int((dt - now).total_seconds() / 60)
+            })
+        except Exception:
             continue
-        
-        if not in_vevent:
-            continue
-            
-        if 'UID:' in line:
-            match = re.search(r'UID:([^\r\n]+)', line)
-            if match:
-                current_event['uid'] = match.group(1).strip()
-        if 'DTSTART' in line:
-            dt = _parse_dtstart_from_line(line)
-            if dt:
-                current_event['dt'] = dt
-        if 'SUMMARY' in line:
-            match = re.search(r'SUMMARY:([^\r\n]+)', line)
-            if match:
-                current_event['summary'] = match.group(1).strip()
     
     return events
 
