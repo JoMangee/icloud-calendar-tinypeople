@@ -74,11 +74,6 @@ def _debug_log(message):
         print(f"[bridge-debug][calendar] {message}", file=sys.stderr, flush=True)
 
 
-def _local_now_naive():
-    """Return local wall-clock time as naive datetime for stable downstream behavior."""
-    return datetime.now().astimezone().replace(tzinfo=None)
-
-
 def _resolve_zoneinfo(tzid):
     if not tzid or ZoneInfo is None:
         return None
@@ -89,9 +84,27 @@ def _resolve_zoneinfo(tzid):
 
 
 def _configured_event_timezone():
-    """Optional IANA timezone used when creating events (e.g., Europe/Berlin)."""
+    """Optional IANA timezone used for events (e.g., Pacific/Auckland)."""
     tzid = (config.get("event_timezone", "") or os.environ.get("ICLOUD_EVENT_TZ", "")).strip()
     return tzid
+
+
+def _display_tzinfo():
+    """Timezone used to render/compare event times.
+
+    Uses the configured event_timezone so display is independent of the
+    server OS's local timezone; falls back to the server's local zone only
+    when no event_timezone is configured or it fails to resolve.
+    """
+    tz = _resolve_zoneinfo(_configured_event_timezone())
+    if tz:
+        return tz
+    return datetime.now().astimezone().tzinfo
+
+
+def _local_now_naive():
+    """Return wall-clock time in the display timezone as naive datetime."""
+    return datetime.now(_display_tzinfo()).replace(tzinfo=None)
 
 
 def _parse_dtstart_from_line(line):
@@ -127,15 +140,15 @@ def _parse_dtstart_from_line(line):
     mm = match_dt.group(3)
     dt = datetime.strptime(f"{ymd}T{hh}{mm}", "%Y%m%dT%H%M")
 
-    local_tz = datetime.now().astimezone().tzinfo
+    display_tz = _display_tzinfo()
     if value.endswith("Z"):
-        return dt.replace(tzinfo=timezone.utc).astimezone(local_tz).replace(tzinfo=None)
+        return dt.replace(tzinfo=timezone.utc).astimezone(display_tz).replace(tzinfo=None)
 
     event_tz = _resolve_zoneinfo(tzid)
     if event_tz:
-        return dt.replace(tzinfo=event_tz).astimezone(local_tz).replace(tzinfo=None)
+        return dt.replace(tzinfo=event_tz).astimezone(display_tz).replace(tzinfo=None)
 
-    # Floating time (no explicit zone): treat as local wall-clock.
+    # Floating time (no explicit zone): treat as already being in the display zone.
     return dt
 
 def _config_candidates():

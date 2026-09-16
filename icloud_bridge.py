@@ -21,10 +21,13 @@ import hashlib
 import hmac
 import os
 import time
+from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request
 
 import icloud_calendar as calendar
+
+_process_started_at = datetime.now(timezone.utc).isoformat()
 
 ACTION_PATHS = {
     "calendars": "/v1/calendars",
@@ -182,9 +185,14 @@ def health():
         "build": _deploy["build"],
         "credentials_set": bool(getattr(calendar, "apple_id", "") and getattr(calendar, "app_password", "")),
         "calendar_count": len(getattr(calendar, "CALENDARS", {}) or {}),
+        "process_started_at": _process_started_at,
     }
     if _debug_enabled():
         response["debug_flag_path"] = _debug_flag_path()
+        response["config_path"] = getattr(calendar, "CONFIG_PATH", "")
+        event_tz = calendar._configured_event_timezone()
+        response["event_timezone"] = event_tz or None
+        response["event_timezone_resolved"] = bool(event_tz and calendar._resolve_zoneinfo(event_tz))
     return jsonify(response)
 
 
