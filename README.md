@@ -25,6 +25,12 @@ This project is adapted from [lemoncat7/icloud-calendar](https://github.com/lemo
 - Rate limiting
 - Health/diagnostics endpoint
 
+## Bug fix notes
+
+### 2026-09-16: Event display timezone fix
+
+Fixed a bug where `event_timezone` was only applied when creating events, not when displaying them. `list`/`today`/`upcoming` computed "now" and converted `DTSTART` values using the server OS's local timezone, so on a server not set to the configured zone, displayed times were off by the offset difference. Display now consistently uses `event_timezone` (falling back to server local time only if unset).
+
 ## Installation
 
 ```bash
@@ -210,7 +216,8 @@ Returns:
   "revision": "abc1234",
   "build": "2026-05-17T02:53:31Z",
   "credentials_set": true,
-  "calendar_count": 9
+  "calendar_count": 9,
+  "process_started_at": "2026-09-16T11:08:52+00:00"
 }
 ```
 
@@ -218,7 +225,10 @@ When runtime debug is enabled, `/health` also includes:
 
 ```json
 {
-  "debug_flag_path": "/path/to/bridge-debug.on"
+  "debug_flag_path": "/path/to/bridge-debug.on",
+  "config_path": "/path/to/loaded/config.json",
+  "event_timezone": "UTC",
+  "event_timezone_resolved": true
 }
 ```
 
