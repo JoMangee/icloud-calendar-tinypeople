@@ -227,7 +227,8 @@ Returns:
   "revision": "abc1234",
   "build": "2026-05-17T02:53:31Z",
   "credentials_set": true,
-  "calendar_count": 9
+  "calendar_count": 9,
+  "process_started_at": "2026-09-16T11:08:52+00:00"
 }
 ```
 
@@ -236,6 +237,7 @@ When runtime debug is enabled, `/health` also includes:
 ```json
 {
   "debug_flag_path": "/path/to/bridge-debug.on",
+  "config_path": "/path/to/loaded/config.json",
   "event_timezone": "Pacific/Auckland",
   "event_timezone_resolved": true
 }
