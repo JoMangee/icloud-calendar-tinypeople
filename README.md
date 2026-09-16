@@ -4,8 +4,8 @@
 
 ## Project status
 
-This is an unofficial personal integration built for my tinyPeople workflows.
-It is intended as a practical dev-around to use a SKILL.md style usage and direct tool integration from .openclaw and get it working for tinyNature agents.
+This is an unofficial personal integration built for tinyPeople workflows.
+It is intended as a practical dev-around for SKILL.md style usage and direct tool integration used by .openclaw to be used with tinyNature agents.
 It is not an official tinyNature or tinyPeople project, product, or supported codebase.
 
 ## Attribution
@@ -30,6 +30,17 @@ This project is adapted from [lemoncat7/icloud-calendar](https://github.com/lemo
 ### 2026-09-16: Event display timezone fix
 
 Fixed a bug where `event_timezone` was only applied when creating events, not when displaying them. `list`/`today`/`upcoming` computed "now" and converted `DTSTART` values using the server OS's local timezone, so on a server not set to the configured zone, displayed times were off by the offset difference. Display now consistently uses `event_timezone` (falling back to server local time only if unset).
+
+### 2026-06-27: CalDAV event parsing regression fix
+
+Fixed a parser issue where CalDAV `REPORT` responses could return large payloads but still yield `parsed_events=0`.
+
+What was fixed:
+
+- normalize escaped/newline-variant iCal payloads from `calendar-data`
+- unfold RFC5545 folded lines
+- parse `VEVENT` blocks directly instead of relying on line-by-line boundary state
+- support parameterized iCal properties (for example `SUMMARY;LANGUAGE=en-US:`)
 
 ## Installation
 
@@ -216,8 +227,7 @@ Returns:
   "revision": "abc1234",
   "build": "2026-05-17T02:53:31Z",
   "credentials_set": true,
-  "calendar_count": 9,
-  "process_started_at": "2026-09-16T11:08:52+00:00"
+  "calendar_count": 9
 }
 ```
 
@@ -226,8 +236,7 @@ When runtime debug is enabled, `/health` also includes:
 ```json
 {
   "debug_flag_path": "/path/to/bridge-debug.on",
-  "config_path": "/path/to/loaded/config.json",
-  "event_timezone": "UTC",
+  "event_timezone": "Pacific/Auckland",
   "event_timezone_resolved": true
 }
 ```
@@ -276,6 +285,26 @@ Set `bridge.debug_flag_file` in your config.json:
 
 ```text
 https://your-bridge-host.example/v1/events/today?action=today&key_id=agent-main&digest=<precomputed-digest>
+```
+
+Upcoming endpoint examples:
+
+```text
+# Default 30-minute window
+https://your-bridge-host.example/v1/events/upcoming?action=upcoming&minutes=30&key_id=agent-main&digest=<upcoming-digest>
+
+# Longer 180-minute window
+https://your-bridge-host.example/v1/events/upcoming?action=upcoming&minutes=180&key_id=agent-main&digest=<upcoming-digest>
+```
+
+`minutes` is a query parameter on `/v1/events/upcoming`.
+Use the same `upcoming` digest for different `minutes` values because digest binding is based on `action` + endpoint `path`.
+
+CLI equivalent:
+
+```bash
+# Next 3 hours
+python3 icloud_calendar.py upcoming 180
 ```
 
 ### Keep local values out of git
@@ -367,6 +396,9 @@ POD_APP_BUILD=2026-05-17T02:53:31Z
 ```
 
 These are exposed via the `/health` endpoint for status monitoring and version tracking.
+
+After deploying this fix, verify that `/health` reports a new `revision` and `build` value.
+If those values did not change, the updated code has not been deployed yet.
 
 ## Commands
 
