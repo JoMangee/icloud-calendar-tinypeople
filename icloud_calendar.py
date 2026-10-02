@@ -487,8 +487,8 @@ def parse_events_with_uid(result, now):
 
         uid = _extract_ical_field(block, "UID")
         summary = _extract_ical_field(block, "SUMMARY")
-        dt_line_match = re.search(r'(?im)^DTSTART[^:\r\n]*:[^\r\n]+', block)
-        dt = _parse_dtstart_from_line(dt_line_match.group(0)) if dt_line_match else None
+        dt_line = _extract_dtstart_line(block)
+        dt = _parse_dtstart_from_line(dt_line) if dt_line else None
 
         if not (dt and uid and summary):
             continue
