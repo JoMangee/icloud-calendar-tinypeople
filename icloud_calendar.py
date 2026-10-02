@@ -360,29 +360,25 @@ def get_upcoming_events(
     all_events.sort(key=lambda x: x.get('minutes_until', 99999))
     return {"upcoming": all_events}
 
-
-def get_today_events():
-    """Return today's events"""
+def get_today_events(calendar_filter=None):
     now = _local_now_naive()
     today_end = datetime(now.year, now.month, now.day, 23, 59)
     filter_minutes = max(int((today_end - now).total_seconds() / 60), 1)
     all_events = []
-
     for cal_name, cal_id in CALENDARS.items():
+        if calendar_filter and calendar_filter not in (cal_id, cal_name):
+            continue
         try:
             result = query_calendar_events(cal_id, start_offset_hours=-1, end_offset_days=1)
             events = parse_events(result, now, filter_minutes=filter_minutes)
-            _debug_log(f"today cal={cal_name} id={cal_id} parsed_events={len(events)}")
             for event in events:
                 event['calendar'] = cal_name
                 all_events.append(event)
         except Exception as e:
-            # Keep endpoint responsive even if one calendar fails.
-            _debug_log(f"today cal={cal_name} id={cal_id} failed error={type(e).__name__}: {e}")
+            _debug_log(f'today cal={cal_name} id={cal_id} failed error={type(e).__name__}: {e}')
             continue
-
     all_events.sort(key=lambda x: x.get('minutes_until', 99999))
-    return {"today": all_events}
+    return {'today': all_events}
 
 def cmd_list():
     """List all events (next 7 days)"""
