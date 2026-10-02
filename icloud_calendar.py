@@ -14,6 +14,7 @@ import subprocess
 import sys
 import os
 import re
+import html
 from shutil import which
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -256,6 +257,9 @@ def _normalize_ical_payload(payload):
     """Normalize iCal text from CalDAV XML bodies into line-oriented content."""
     text = payload or ""
 
+    # Decode XML entities before newline normalization.
+    text = html.unescape(text)
+
     # Some servers embed escaped CR/LF sequences inside XML calendar-data.
     if "\\r\\n" in text or "\\n" in text or "\\r" in text:
         text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
@@ -269,33 +273,47 @@ def _normalize_ical_payload(payload):
 
 def _extract_ical_field(block, field_name):
     """Extract a field value allowing optional iCal parameters."""
-    pattern = rf'(?im)^{re.escape(field_name)}(?:;[^:\r\n]*)?:(?P<value>[^\r\n]*)'
+    pattern = rf'(?im)(?:^|\n){re.escape(field_name)}(?:;[^:\r\n]*)?:(?P<value>[^\r\n]*)'
     match = re.search(pattern, block)
     if not match:
         return ""
     return (match.group("value") or "").strip()
 
 
+def _extract_dtstart_line(block):
+    """Return DTSTART line with optional params from a VEVENT block."""
+    match = re.search(r'(?im)(?:^|\n)(DTSTART[^:\r\n]*:[^\r\n]+)', block)
+    if not match:
+        return ""
+    return (match.group(1) or "").strip()
+
+
 def _iter_vevent_blocks(payload):
     """Yield VEVENT payloads from a CalDAV REPORT response."""
     normalized = _normalize_ical_payload(payload)
-    return re.finditer(r'BEGIN:VEVENT\n(?P<body>.*?)\nEND:VEVENT', normalized, flags=re.S | re.I)
+    return re.finditer(r'BEGIN:VEVENT(?:\n)?(?P<body>.*?)(?:\n)?END:VEVENT', normalized, flags=re.S | re.I)
 
-def parse_events(result, now, filter_minutes=30):
-    """Parse events"""
+
+def _parse_events_core(result, now, filter_minutes):
+    """Parse VEVENT blocks and return (events, stats)."""
     events = []
+    stats = {
+        "vevent_blocks": 0,
+        "candidate_events": 0,
+        "window_events": 0,
+    }
+
     for match in _iter_vevent_blocks(result):
+        stats["vevent_blocks"] += 1
         block = match.group("body")
 
-        dt_line_match = re.search(r'(?im)^DTSTART[^:\r\n]*:[^\r\n]+', block)
-        if not dt_line_match:
-            continue
-
-        dt = _parse_dtstart_from_line(dt_line_match.group(0))
+        dt_line = _extract_dtstart_line(block)
+        dt = _parse_dtstart_from_line(dt_line) if dt_line else None
         summary = _extract_ical_field(block, "SUMMARY")
         if not dt or not summary:
             continue
 
+        stats["candidate_events"] += 1
         try:
             diff = (dt - now).total_seconds() / 60
             if 0 <= diff < filter_minutes:
@@ -305,9 +323,16 @@ def parse_events(result, now, filter_minutes=30):
                     'minutes_until': int(diff),
                     'calendar': 'Unknown'
                 })
+                stats["window_events"] += 1
         except Exception:
             continue
-    
+
+    return events, stats
+
+
+def parse_events(result, now, filter_minutes=30):
+    """Parse events"""
+    events, _ = _parse_events_core(result, now, filter_minutes)
     return events
 
 def list_calendars():
@@ -324,8 +349,11 @@ def get_events_list(days=7, limit=20):
     for cal_name, cal_id in CALENDARS.items():
         try:
             result = query_calendar_events(cal_id, start_offset_hours=-24, end_offset_days=days)
-            events = parse_events(result, now, filter_minutes=max(days * 1440, 1))
-            _debug_log(f"list cal={cal_name} id={cal_id} parsed_events={len(events)}")
+            events, stats = _parse_events_core(result, now, filter_minutes=max(days * 1440, 1))
+            _debug_log(
+                f"list cal={cal_name} id={cal_id} vevents={stats['vevent_blocks']} "
+                f"candidates={stats['candidate_events']} parsed_events={len(events)}"
+            )
             for event in events:
                 event['calendar'] = cal_name
                 all_events.append(event)
@@ -347,8 +375,11 @@ def get_upcoming_events(
     for cal_name, cal_id in CALENDARS.items():
         try:
             result = query_calendar_events(cal_id, start_offset_hours=-1, end_offset_days=1)
-            events = parse_events(result, now, filter_minutes=max(minutes, 1))
-            _debug_log(f"upcoming cal={cal_name} id={cal_id} parsed_events={len(events)}")
+            events, stats = _parse_events_core(result, now, filter_minutes=max(minutes, 1))
+            _debug_log(
+                f"upcoming cal={cal_name} id={cal_id} vevents={stats['vevent_blocks']} "
+                f"candidates={stats['candidate_events']} parsed_events={len(events)}"
+            )
             for event in events:
                 event['calendar'] = cal_name
                 all_events.append(event)
@@ -370,15 +401,19 @@ def get_today_events(calendar_filter=None):
             continue
         try:
             result = query_calendar_events(cal_id, start_offset_hours=-1, end_offset_days=1)
-            events = parse_events(result, now, filter_minutes=filter_minutes)
+            events, stats = _parse_events_core(result, now, filter_minutes=filter_minutes)
+            _debug_log(
+                f"today cal={cal_name} id={cal_id} vevents={stats['vevent_blocks']} "
+                f"candidates={stats['candidate_events']} parsed_events={len(events)}"
+            )
             for event in events:
                 event['calendar'] = cal_name
                 all_events.append(event)
         except Exception as e:
-            _debug_log(f'today cal={cal_name} id={cal_id} failed error={type(e).__name__}: {e}')
+            _debug_log(f"today cal={cal_name} id={cal_id} failed error={type(e).__name__}: {e}")
             continue
     all_events.sort(key=lambda x: x.get('minutes_until', 99999))
-    return {'today': all_events}
+    return {"today": all_events}
 
 def cmd_list():
     """List all events (next 7 days)"""

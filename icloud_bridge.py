@@ -205,15 +205,15 @@ def route_calendars():
     _debug_log(f"response path=/v1/calendars calendar_count={len(data or {})}")
     return jsonify({"ok": True, "data": data})
 
-@app.route('/v1/events/today')
+@app.route("/v1/events/today")
 def route_today():
-    err = _guard('/v1/events/today')
+    err = _guard("/v1/events/today")
     if err:
         return err
-    cal = request.args.get('calendar') or request.args.get('cal')
+    cal = request.args.get("calendar") or request.args.get("cal")
     data = calendar.get_today_events(calendar_filter=cal)
-    _debug_log(f'response path=/v1/events/today count={len((data or {}).get("today", []))}')
-    return jsonify({'ok': True, 'data': data})
+    _debug_log(f"response path=/v1/events/today count={len((data or {}).get('today', []))}")
+    return jsonify({"ok": True, "data": data})
 
 @app.route("/v1/events/upcoming")
 def route_upcoming():
