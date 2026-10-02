@@ -27,6 +27,9 @@ This project is adapted from [lemoncat7/icloud-calendar](https://github.com/lemo
 
 ## Bug fix notes
 
+### 2026-10-03: Today filter by calendar
+/v1/events/today now accepts calendar=<id or name> to return only events for that calendar (e.g. calendar=Home).
+
 ### 2026-09-16: Event display timezone fix
 
 Fixed a bug where `event_timezone` was only applied when creating events, not when displaying them. `list`/`today`/`upcoming` computed "now" and converted `DTSTART` values using the server OS's local timezone, so on a server not set to the configured zone, displayed times were off by the offset difference. Display now consistently uses `event_timezone` (falling back to server local time only if unset).
@@ -159,7 +162,7 @@ Use `icloud_bridge.py` to expose read endpoints for low-capability agents that c
 ### Endpoints
 
 - `GET /v1/calendars`
-- `GET /v1/events/today`
+- `GET /v1/events/today?calendar=id|name`
 - `GET /v1/events/upcoming?minutes=30`
 - `GET /v1/events/list?days=7&limit=20`
 
